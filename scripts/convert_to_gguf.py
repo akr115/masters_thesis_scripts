@@ -8,9 +8,9 @@ from pathlib import Path
 USER           = os.environ["USER"]
 BASE           = Path(f"/home2/{USER}/masters_thesis")
 
-HF_MODEL_DIR   = BASE / "models" / "llama3.2-3b-wanda-pruned"
-OUTPUT_DIR     = BASE / "llama3.2-3b-compressed" / "pruned"
-GGUF_F16       = OUTPUT_DIR / "llama3.2-3b-wanda-66-f16.gguf"
+HF_MODEL_DIR = BASE / "models" / "llama3.2-3b"
+OUTPUT_DIR   = BASE / "llama3.2-3b-gguf"
+GGUF_F16     = OUTPUT_DIR / "llama3.2-3b-f16.gguf"
 
 LLAMA_CPP_DIR  = BASE / "llama.cpp"
 CONVERT_SCRIPT = LLAMA_CPP_DIR / "convert_hf_to_gguf.py"

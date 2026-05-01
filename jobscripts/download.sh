@@ -15,8 +15,8 @@ VENV_DIR="$BASE/venv"
 source "$VENV_DIR/bin/activate"
 
 # ── download ─────────────────────────────────────────
-hf download meta-llama/Llama-3.2-3B \
-  --local-dir $BASE/models/llama3.2-3b 
+hf download meta-llama/Llama-3.2-1B \
+  --local-dir $BASE/models/llama3.2-1b 
 
 # ── verify ───────────────────────────────────────────
-ls -lh $BASE/models/llama3.2-3b
+ls -lh $BASE/models/llama3.2-1b
