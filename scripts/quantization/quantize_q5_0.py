@@ -5,9 +5,7 @@ import time
 from pathlib import Path
 from tqdm import tqdm
  
-# ──────────────────────────────────────────────
-# Paths
-# ──────────────────────────────────────────────
+# --- Paths
 USER           = os.environ["USER"]
 BASE           = Path(f"/home2/{USER}/masters_thesis")
  
@@ -22,9 +20,7 @@ CONVERT_SCRIPT = LLAMA_CPP_DIR / "convert_hf_to_gguf.py"
 LLAMA_QUANTIZE = LLAMA_CPP_DIR / "build" / "bin" / "llama-quantize"
  
  
-# ──────────────────────────────────────────────
-# Sanity checks before doing any work
-# ──────────────────────────────────────────────
+# --- Sanity checks before doing any work
 def check_paths():
     missing = []
     for p in [HF_MODEL_DIR, CONVERT_SCRIPT, LLAMA_QUANTIZE]:
@@ -41,9 +37,7 @@ def check_paths():
     print(f"  binary: {LLAMA_QUANTIZE}")
  
  
-# ──────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────
+# --- Helpers
 def run(cmd: list, desc: str) -> None:
     print(f"\n[STEP] {desc}")
     print(f"  CMD: {' '.join(str(c) for c in cmd)}\n")
@@ -54,9 +48,7 @@ def file_size_gb(path: Path) -> float:
     return path.stat().st_size / (1024 ** 3)
  
  
-# ──────────────────────────────────────────────
-# Step 1: Convert HF model -> GGUF f16
-# ──────────────────────────────────────────────
+# --- Step 1: Convert HF model -> GGUF f16
 def convert_to_gguf():
     run(
         [
@@ -69,9 +61,7 @@ def convert_to_gguf():
     )
  
  
-# ──────────────────────────────────────────────
-# Step 2: Quantize GGUF f16 -> Q5_0
-# ──────────────────────────────────────────────
+# --- Step 2: Quantize GGUF f16 -> Q5_0
 def quantize_q5_0():
     run(
         [str(LLAMA_QUANTIZE), str(GGUF_F16), str(GGUF_Q5_0), "Q5_0"],
@@ -79,9 +69,7 @@ def quantize_q5_0():
     )
  
  
-# ──────────────────────────────────────────────
-# Step 3: Save metadata
-# ──────────────────────────────────────────────
+# --- Step 3: Save metadata
 def save_metadata(timings: dict):
     metadata = {
         "model_id": "meta-llama/Llama-3.2-3B",
@@ -103,9 +91,7 @@ def save_metadata(timings: dict):
     print(json.dumps(metadata, indent=2))
  
  
-# ──────────────────────────────────────────────
-# Main
-# ──────────────────────────────────────────────
+# --- Main
 if __name__ == "__main__":
     check_paths()
     timings = {}

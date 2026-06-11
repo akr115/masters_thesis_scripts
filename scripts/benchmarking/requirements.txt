@@ -1,0 +1,22 @@
+# test runner
+pytest
+
+# DataFrame-based evaluation (evaluation.py, evaluations/)
+pandas
+
+# HTTP client for llama-server /completion calls (generate.py)
+requests
+
+# Configuration (config.py)
+pydantic-settings
+
+# GGUF metadata reader (bench/gguf_meta.py)
+gguf
+
+# TruthfulQA scoring: ROUGE-L + TF-IDF cosine similarity
+rouge-score
+scikit-learn
+
+# HumanEval: pass@k code execution metric
+evaluate
+datasets

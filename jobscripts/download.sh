@@ -11,12 +11,12 @@ module load Python/3.13.5-GCCcore-14.3.0
 BASE="$HOME/masters_thesis"
 VENV_DIR="$BASE/venv"
 
-# ── venv ─────────────────────────────────────────────
+# --- venv
 source "$VENV_DIR/bin/activate"
 
-# ── download ─────────────────────────────────────────
+# --- download
 hf download meta-llama/Llama-3.2-1B \
   --local-dir $BASE/models/llama3.2-1b 
 
-# ── verify ───────────────────────────────────────────
+# --- verify
 ls -lh $BASE/models/llama3.2-1b

@@ -11,7 +11,7 @@
 module purge
 module load Python/3.13.5-GCCcore-14.3.0
 
-# ── 1. Paths ───────────────────────────────────────────────────────────────────
+# --- paths
 BASE="$HOME/masters_thesis"
 
 SCRIPTS_DIR="$BASE/masters_thesis_scripts"
@@ -22,7 +22,7 @@ WANDA_DIR="$BASE/wanda"
 MODEL_IN="$BASE/models/llama3.2-3b"
 MODEL_OUT="$BASE/models/llama3.2-3b-wanda-pruned"
 
-# ── 2. Virtual environment ─────────────────────────────────────────────────────
+# --- venv
 if [ ! -d "$VENV_DIR" ]; then
     echo "[JOB] Creating venv at $VENV_DIR"
     python -m venv "$VENV_DIR"
@@ -40,21 +40,23 @@ echo "[JOB] Python: $(python --version)"
 echo "[JOB] torch: $(python -c 'import torch; print(torch.__version__)')"
 echo "[JOB] CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())')"
 echo "[JOB] GPU: $(python -c 'import torch; print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none")')"
-# ── 3. Run pruning ─────────────────────────────────────────────────────────────
+# --- Run pruning
 echo "[JOB] Starting WANDA pruning (CPU)"
 
 # export CUDA_VISIBLE_DEVICES=""
 
 cd "$WANDA_DIR"
 
+# sparsity_ratio: fraction of weights removed (0.66 ~= 66% sparsity).
+# sparsity_type: unstructured sparsity across individual weights.
 python main.py \
   --model "$MODEL_IN" \
   --prune_method wanda \
   --sparsity_ratio 0.66 \
   --sparsity_type unstructured \
-  --save_model "$MODEL_OUT" 
+  --save_model "$MODEL_OUT"
 
-# ── 4. Confirm output ──────────────────────────────────────────────────────────
+# --- confirm output
 echo "[JOB] Output model:"
 ls -lh "$MODEL_OUT"
 
