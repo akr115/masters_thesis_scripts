@@ -1,2 +1,6 @@
 *.out
 venv/
+config.env
+.DS_Store
+__pycache__/
+outputs/

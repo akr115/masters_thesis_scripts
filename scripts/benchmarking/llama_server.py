@@ -1,22 +1,24 @@
-from pathlib import Path
-from config import cfg
+import json
 import subprocess
 import requests
 import time
+from pathlib import Path
+
+from config import cfg
 
 HOST = "127.0.0.1"
 PORT = 8080
+SERVER_START_TIMEOUT = 120
+REQUEST_TIMEOUT = 20
 
-SERVER_START_TIMEOUT = 120 # seconds to wait for model to load
-REQUEST_TIMEOUT = 20        # seconds per prompt
 
-# This class manages the llama server process and provides a method to send completion requests.
 class LlamaServer:
     def __init__(self, model_path: str | Path, port: int = PORT):
         self.model_path = Path(model_path)
         self.port = port
         self._base = f"http://{HOST}:{port}"
         self._proc = None
+        self.ttlm_s: float | None = None
 
     def __enter__(self):
         self._start()
@@ -31,20 +33,23 @@ class LlamaServer:
             "-m", str(self.model_path),
             "--host", HOST,
             "--port", str(self.port),
-            "-ngl", str(cfg.llama_n_gpu_layers),
+            "-c", str(cfg.llama_n_ctx),
             "-b", str(cfg.llama_batch_size),
+            "--cache-type-k", cfg.llama_kv_cache_type,
+            "--cache-type-v", cfg.llama_kv_cache_type,
+            "--no-webui",
         ]
+        if cfg.llama_n_gpu_layers >= 0:
+            cmd += ["-ngl", str(cfg.llama_n_gpu_layers)]
         if cfg.llama_n_threads > 0:
             cmd += ["-t", str(cfg.llama_n_threads)]
         if cfg.llama_n_threads_batch > 0:
             cmd += ["-tb", str(cfg.llama_n_threads_batch)]
 
-        self._proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
+        t0 = time.perf_counter()
+        self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         self._wait_ready()
+        self.ttlm_s = time.perf_counter() - t0
 
     def _wait_ready(self):
         deadline = time.monotonic() + SERVER_START_TIMEOUT
@@ -57,9 +62,7 @@ class LlamaServer:
                 pass
             time.sleep(1)
         self._stop()
-        raise RuntimeError(
-            f"llama-server did not become ready within {SERVER_START_TIMEOUT}s"
-        )
+        raise RuntimeError(f"llama-server did not become ready within {SERVER_START_TIMEOUT}s")
 
     def _stop(self):
         if self._proc and self._proc.poll() is None:
@@ -70,17 +73,53 @@ class LlamaServer:
                 self._proc.kill()
         self._proc = None
 
-    def complete(self, prompt: str) -> str:
-        """POST to /completion and return the generated text string."""
-        payload = {
-            "prompt": prompt,
-            "temperature": cfg.llama_temperature,
-            "n_predict": cfg.llama_n_predict,
-        }
-        r = requests.post(
-            f"{self._base}/completion",
-            json=payload,
-            timeout=REQUEST_TIMEOUT,
-        )
+    def complete(self, prompt: str) -> dict:
+        payload = {"prompt": prompt, "temperature": cfg.llama_temperature, "n_predict": cfg.llama_n_predict}
+        t0 = time.perf_counter()
+        r = requests.post(f"{self._base}/completion", json=payload, timeout=REQUEST_TIMEOUT)
+        t_done = time.perf_counter()
         r.raise_for_status()
-        return r.json()["content"]
+        body = r.json()
+        tim = body.get("timings", {})
+        return {
+            "content":          body["content"],
+            "e2e_latency_s":    t_done - t0,
+            "ttft_approx_ms":   tim.get("prompt_ms"),
+            "throughput_tps":   tim.get("predicted_per_second"),
+            "prompt_tokens":    tim.get("prompt_n"),
+            "generated_tokens": tim.get("predicted_n"),
+            "generation_ms":    tim.get("predicted_ms"),
+        }
+
+    def complete_stream(self, prompt: str) -> dict:
+        """Streaming /completion — records wall-clock TTFT from first SSE chunk."""
+        payload = {"prompt": prompt, "temperature": cfg.llama_temperature,
+                   "n_predict": cfg.llama_n_predict, "stream": True}
+        t0 = time.perf_counter()
+        ttft_s = None
+        content_parts = []
+        final_timings = {}
+
+        with requests.post(f"{self._base}/completion", json=payload,
+                           stream=True, timeout=REQUEST_TIMEOUT) as r:
+            r.raise_for_status()
+            for raw in r.iter_lines():
+                if not raw or not raw.startswith(b"data: "):
+                    continue
+                chunk = json.loads(raw[6:])
+                if ttft_s is None:
+                    ttft_s = time.perf_counter() - t0
+                content_parts.append(chunk.get("content", ""))
+                if chunk.get("stop"):
+                    final_timings = chunk.get("timings", {})
+                    break
+
+        return {
+            "content":          "".join(content_parts),
+            "ttft_s":           ttft_s,
+            "e2e_latency_s":    time.perf_counter() - t0,
+            "throughput_tps":   final_timings.get("predicted_per_second"),
+            "prompt_tokens":    final_timings.get("prompt_n"),
+            "generated_tokens": final_timings.get("predicted_n"),
+            "generation_ms":    final_timings.get("predicted_ms"),
+        }
