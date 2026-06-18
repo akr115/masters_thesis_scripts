@@ -53,8 +53,8 @@ def evaluate_responses(
         raise ValueError(f"Unknown dataset: {dataset!r}")
 
 
-def save_results(df: pd.DataFrame, stats: dict, output_dir: Path, dataset: str, run: int) -> None:
-    """Save per-row results as JSONL and append run stats to a summary file."""
+def save_results(df: pd.DataFrame, output_dir: Path) -> None:
+    """Append per-row results to the unified rows.jsonl file."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     def _default(obj):
@@ -68,13 +68,7 @@ def save_results(df: pd.DataFrame, stats: dict, output_dir: Path, dataset: str, 
             return float(obj)
         raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
-    # Raw per-row JSONL — one file per dataset, one line per row, tagged with run index
-    rows_path = output_dir / f"{dataset}.jsonl"
+    rows_path = output_dir / "rows.jsonl"
     with rows_path.open("a") as f:
-        for record in df.assign(run=run).to_dict(orient="records"):
+        for record in df.to_dict(orient="records"):
             f.write(json.dumps(record, default=_default) + "\n")
-
-    # Running stats — one line per (dataset, run) pair
-    stats_path = output_dir / f"{dataset}_stats.jsonl"
-    with stats_path.open("a") as f:
-        f.write(json.dumps({"run": run, **stats}, default=_default) + "\n")

@@ -1,6 +1,9 @@
 # test runner
 pytest
 
+# Progress bars
+tqdm
+
 # DataFrame-based evaluation (evaluation.py, evaluations/)
 pandas
 
