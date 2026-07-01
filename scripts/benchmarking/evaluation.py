@@ -11,6 +11,15 @@ from evaluations.evaluate_humaneval_utils import evaluate_df as _eval_humaneval
 from evaluations.evaluate_truthfulqa_utils import evaluate_df as _eval_truthfulqa
 
 
+_EVALUATORS = {
+    "commonsenseqa": _eval_commonsenseqa,
+    "bbh": _eval_bbh,
+    "gsm8k": _eval_gsm8k,
+    "humaneval": _eval_humaneval,
+    "truthfulqa": _eval_truthfulqa,
+}
+
+
 def evaluate_responses(
     dataset: str,
     rows: List[dict],
@@ -21,36 +30,19 @@ def evaluate_responses(
 
     Returns (df_with_results, stats_dict).
     """
-    if dataset == "commonsenseqa":
-        df = pd.DataFrame(rows)
-        df["output"] = responses
-        return _eval_commonsenseqa(df)
+    evaluator = _EVALUATORS.get(dataset)
+    if evaluator is None:
+        raise ValueError(f"Unknown dataset: {dataset!r}")
 
-    elif dataset == "bbh":
+    df = pd.DataFrame(rows)
+    df["output"] = responses
+
+    if dataset == "bbh":
         if prompts is None:
             raise ValueError("BBH evaluation requires formatted prompts — pass prompts= to evaluate_responses")
-        df = pd.DataFrame(rows)
-        df["output"] = responses
         df["formatted_prompt"] = prompts
-        return _eval_bbh(df)
 
-    elif dataset == "gsm8k":
-        df = pd.DataFrame(rows)
-        df["output"] = responses
-        return _eval_gsm8k(df)
-
-    elif dataset == "humaneval":
-        df = pd.DataFrame(rows)
-        df["output"] = responses
-        return _eval_humaneval(df)
-
-    elif dataset == "truthfulqa":
-        df = pd.DataFrame(rows)
-        df["output"] = responses
-        return _eval_truthfulqa(df)
-
-    else:
-        raise ValueError(f"Unknown dataset: {dataset!r}")
+    return evaluator(df)
 
 
 def save_results(df: pd.DataFrame, output_dir: Path) -> None:
@@ -59,7 +51,7 @@ def save_results(df: pd.DataFrame, output_dir: Path) -> None:
 
     def _default(obj):
         if isinstance(obj, (set, frozenset)):
-            return sorted(list(obj))
+            return sorted(obj)
         if isinstance(obj, np.bool_):
             return bool(obj)
         if isinstance(obj, np.integer):

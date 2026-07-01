@@ -31,6 +31,8 @@ def run_perplexity(model_path: str | Path, output_dir: Path) -> dict:
         "-m", str(model_path),
         "-f", str(cfg.wikitext_path),
         "-ngl", str(cfg.llama_n_gpu_layers),
+        "-c", str(cfg.llama_n_ctx), 
+        "-b", str(cfg.llama_batch_size),
     ]
     if cfg.llama_n_threads > 0:
         cmd += ["-t", str(cfg.llama_n_threads)]

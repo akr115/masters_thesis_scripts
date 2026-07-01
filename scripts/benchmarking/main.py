@@ -105,9 +105,15 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=Path, default=Path("outputs"))
     args = parser.parse_args()
 
+    if not args.accuracy and not args.performance_benchmark:
+        parser.error("No benchmark selected. Provide --accuracy and/or --performance_benchmark.")
+
     model_stem = Path(args.model).stem
     output_dir = args.output_dir / model_stem
     print(f"Model: {model_stem}")
+
+    if not args.accuracy and args.performance_benchmark:
+        print("WARNING: --accuracy not set. Skipping accuracy evaluation.")
 
     if args.accuracy == "datasets":
         print(f"Running accuracy evaluation on datasets: {', '.join(DATASETS)}")
@@ -120,11 +126,14 @@ if __name__ == "__main__":
                     for line in Path(DATASET_PATHS[dataset]).read_text().splitlines()
                     if line.strip()
                 ]
+                # HumanEval functions can require many tokens to implement fully;
+                # cap other datasets at llama_n_predict to keep runs bounded.
+                max_tok = -1 if dataset == "humaneval" else cfg.llama_n_predict
                 for run in tqdm(range(args.iterations), desc=dataset, leave=False):
                     prompts, responses, timings = [], [], []
                     for row in tqdm(rows, desc="prompts", leave=False):
                         prompt = process_prompt(dataset, row)
-                        result = server.complete(prompt)
+                        result = server.complete(prompt, max_tokens=max_tok)
                         prompts.append(prompt)
                         responses.append(result["content"])
                         timings.append({k: result[k] for k in TIMING_KEYS})

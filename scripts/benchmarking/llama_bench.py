@@ -23,9 +23,8 @@ from typing import Any
 
 from config import cfg
 
-# Default sweep matching ELIB paper (Chen et al. 2025) — can be overridden.
-DEFAULT_PP_SIZES = (128, 512)   # prefill (prompt) token counts
-DEFAULT_TG_SIZES = (128,)       # generation (decode) token counts
+DEFAULT_PP_SIZES = (128, 256, 512, 1024, 2048)
+DEFAULT_TG_SIZES = (128, 256, 512)    # generation (decode) token counts
 DEFAULT_REPETITIONS = 5         # warmup + averaging handled by llama-bench
 
 
@@ -48,10 +47,22 @@ def run_llama_bench(
         {
             "avg_ts":              float,  # average throughput (tokens/s)
             "stddev_ts":           float,  # stddev of throughput
-            "avg_ns":              int,    # average wall-clock time (nanoseconds)
-            "latency_ms_per_token": float, # 1000 / avg_ts
+            "avg_ns":              int,    # whole-phase wall-clock (ns); NOT per-token.
+                                           #   pp: time to prefill N tokens.
+                                           #   tg: time to decode N tokens.
+                                           #   Use latency_ms_per_token for comparisons.
+            "latency_ms_per_token": float, # 1000 / avg_ts (per-token, comparable across phases)
         }
+
+    Keys are assumed unique per invocation: if pp_sizes or tg_sizes contain
+    duplicates, the last result silently overwrites the earlier one.
     """
+    if max(pp_sizes) > cfg.llama_n_ctx or max(tg_sizes) > cfg.llama_n_ctx:
+        raise ValueError(
+            f"pp/tg token count exceeds context length {cfg.llama_n_ctx}: "
+            f"max(pp)={max(pp_sizes)}, max(tg)={max(tg_sizes)}"
+        )
+
     bench_bin = _resolve_bench_bin(model_path)
 
     cmd = [
@@ -82,13 +93,21 @@ def run_llama_bench(
     out: dict[str, Any] = {}
     for row in rows:
         # llama-bench sets n_gen=0 for pure prefill runs and n_prompt=0 for
-        # pure decode runs.
-        if row.get("n_gen", 0) == 0:
+        # pure decode runs.  A combined -pg row has both >0; guard against it
+        # because it would silently collide with a real tg_{n_gen} key.
+        n_prompt = row.get("n_prompt", 0)
+        n_gen    = row.get("n_gen", 0)
+        if n_gen == 0:
             phase  = "pp"
-            tokens = row["n_prompt"]
-        else:
+            tokens = n_prompt
+        elif n_prompt == 0:
             phase  = "tg"
-            tokens = row["n_gen"]
+            tokens = n_gen
+        else:
+            raise ValueError(
+                f"Unexpected combined -pg row (n_prompt={n_prompt}, n_gen={n_gen}). "
+                "Key would collide with tg_{n_gen}. Use separate -p/-n runs."
+            )
 
         avg_ts = float(row["avg_ts"])
         out[f"{phase}_{tokens}"] = {

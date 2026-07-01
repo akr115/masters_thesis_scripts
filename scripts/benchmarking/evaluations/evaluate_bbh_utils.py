@@ -103,10 +103,9 @@ def _match_to_label(
         if cleaned in _letters:
             return "0"
         # Response is a full text — try to match against choices
+        norm_resp = _normalize_text(cleaned)
         for i, choice in enumerate(choices):
-            norm_resp = _normalize_text(cleaned)
-            norm_choice = _normalize_text(choice)
-            if norm_resp in norm_choice or norm_resp == norm_choice:
+            if norm_resp in _normalize_text(choice):
                 return "1" if _letters[i] == answer_key else "0"
         return "None"  # couldn't map to any choice
 

@@ -9,7 +9,7 @@ from config import cfg
 HOST = "127.0.0.1"
 PORT = 8080
 SERVER_START_TIMEOUT = 120
-REQUEST_TIMEOUT = 20
+REQUEST_TIMEOUT = 1200
 
 
 class LlamaServer:
@@ -73,21 +73,33 @@ class LlamaServer:
                 self._proc.kill()
         self._proc = None
 
-    def complete(self, prompt: str) -> dict:
-        payload = {"prompt": prompt, "temperature": cfg.llama_temperature, "n_predict": cfg.llama_n_predict}
+    def complete(self, prompt: str, max_tokens: int | None = None) -> dict:
+        # Use /v1/chat/completions so llama-server applies the model's instruct chat
+        # template automatically — matching the inference setup used by the paper
+        # (Ollama's generate API also applies the template internally).
+        # Sending to /completion instead would bypass the template and degrade
+        # instruction-following significantly for instruct models.
+        n = max_tokens if max_tokens is not None else cfg.llama_n_predict
+        payload: dict = {
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": cfg.llama_temperature,
+        }
+        if n > 0:
+            payload["max_tokens"] = n
         t0 = time.perf_counter()
-        r = requests.post(f"{self._base}/completion", json=payload, timeout=REQUEST_TIMEOUT)
+        r = requests.post(f"{self._base}/v1/chat/completions", json=payload, timeout=REQUEST_TIMEOUT)
         t_done = time.perf_counter()
         r.raise_for_status()
         body = r.json()
         tim = body.get("timings", {})
+        usage = body.get("usage", {})
         return {
-            "content":          body["content"],
+            "content":          body["choices"][0]["message"]["content"],
             "e2e_latency_s":    t_done - t0,
             "ttft_approx_ms":   tim.get("prompt_ms"),
             "throughput_tps":   tim.get("predicted_per_second"),
-            "prompt_tokens":    tim.get("prompt_n"),
-            "generated_tokens": tim.get("predicted_n"),
+            "prompt_tokens":    tim.get("prompt_n") or usage.get("prompt_tokens"),
+            "generated_tokens": tim.get("predicted_n") or usage.get("completion_tokens"),
             "generation_ms":    tim.get("predicted_ms"),
         }
 

@@ -32,12 +32,10 @@ def evaluate_df(df: pd.DataFrame, k: list[int] = [1]) -> tuple[pd.DataFrame, dic
         k=k,
     )
 
-    evaluation = []
-    for result in results.items():
-        evaluation.append((result[0], result[1][0][1]["passed"]))
-
-    sorted_evaluation = sorted(evaluation)
-    evaluation_list = [x[1] for x in sorted_evaluation]
+    passed_by_task = {
+        task_id: outcomes[0][1]["passed"] for task_id, outcomes in results.items()
+    }
+    evaluation_list = [passed_by_task[task_id] for task_id in sorted(passed_by_task)]
 
     df = df.copy()
     df["correct"] = evaluation_list

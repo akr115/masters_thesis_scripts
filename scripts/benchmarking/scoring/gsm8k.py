@@ -21,16 +21,13 @@ def parse_number(text: str | None) -> float | None:
     """Extract the last number from a string (handles commas, $, trailing text)."""
     if text is None:
         return None
-    # strip formatting characters
     cleaned = text.replace(",", "").replace("$", "").strip()
-    # take the last standalone number in the string
     nums = re.findall(r"-?\d+(?:\.\d+)?", cleaned)
     return float(nums[-1]) if nums else None
 
 
 def score_row(row: dict) -> bool:
     """Return True if the model's answer matches the ground truth."""
-    # ground truth: after '####' in the answer field
     answer_text = row["indata"].get("answer", "")
     gt_match = re.search(r"####\s*(.+)", answer_text)
     if not gt_match:

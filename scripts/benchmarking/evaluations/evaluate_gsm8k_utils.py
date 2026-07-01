@@ -10,7 +10,7 @@ def extract_ans_from_answer(answer: str) -> int | str:
     if "####" in answer:
         answer = answer.split("####")[-1].strip()
     answer = answer.strip(" $%g")
-    answer = re.sub(r",", "", answer)
+    answer = answer.replace(",", "")
     try:
         return int(answer)
     except ValueError:
