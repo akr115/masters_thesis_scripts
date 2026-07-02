@@ -38,6 +38,7 @@ class LlamaServer:
             "--cache-type-k", cfg.llama_kv_cache_type,
             "--cache-type-v", cfg.llama_kv_cache_type,
             "--no-webui",
+            "--jinja",  # use full GGUF Jinja template (adds Cutting Knowledge Date system header)
         ]
         if cfg.llama_n_gpu_layers >= 0:
             cmd += ["-ngl", str(cfg.llama_n_gpu_layers)]

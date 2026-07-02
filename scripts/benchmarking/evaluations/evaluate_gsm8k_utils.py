@@ -74,11 +74,10 @@ def evaluate_df(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     df = df.copy()
     df["expected"] = df["answer"].apply(extract_ans_from_answer)
     df["predicted"] = df["output"].apply(extract_real_answers)
+    # pd.notna handles None/NaN; compare as numbers (pandas upcasts int→float64 in
+    # nullable columns, so isinstance(x, int) would always be False)
     df["correct"] = df.apply(
-        lambda row: (
-            isinstance(row["predicted"], int)
-            and row["predicted"] == row["expected"]
-        ),
+        lambda row: pd.notna(row["predicted"]) and row["predicted"] == row["expected"],
         axis=1,
     )
 
