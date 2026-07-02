@@ -23,3 +23,6 @@ scikit-learn
 # HumanEval: pass@k code execution metric
 evaluate
 datasets
+
+# Ollama inference backend (alternative to llama-server)
+ollama

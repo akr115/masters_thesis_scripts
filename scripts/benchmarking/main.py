@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 from config import cfg
 from llama_server import LlamaServer
+from ollama_backend import OllamaBackend
 from llama_bench import run_llama_bench
 from metrics import (
     read_gguf_meta,
@@ -98,7 +99,11 @@ def run_performance_benchmark(model_path: str | Path, output_dir: Path) -> dict:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", required=True, help="Path to .gguf model file")
+    parser.add_argument("--model", default=None, help="Path to .gguf model file (required for llama_server backend and performance benchmark)")
+    parser.add_argument("--backend", choices=["llama_server", "ollama"], default="llama_server",
+                        help="Inference backend for --accuracy datasets (default: llama_server)")
+    parser.add_argument("--ollama_model", default=None,
+                        help="Ollama model name, e.g. llama3.2:1b-instruct-fp16 (required when --backend ollama)")
     parser.add_argument("--accuracy", choices=["datasets", "perplexity"])
     parser.add_argument("--performance_benchmark", action="store_true")
     parser.add_argument("--iterations", type=int, default=5)
@@ -108,18 +113,29 @@ if __name__ == "__main__":
     if not args.accuracy and not args.performance_benchmark:
         parser.error("No benchmark selected. Provide --accuracy and/or --performance_benchmark.")
 
-    model_stem = Path(args.model).stem
+    if args.backend == "ollama" and not args.ollama_model:
+        parser.error("--ollama_model is required when --backend ollama")
+
+    if (args.performance_benchmark or args.accuracy == "perplexity" or args.backend == "llama_server") and not args.model:
+        parser.error("--model is required for llama_server backend, perplexity, and performance benchmark")
+
+    model_stem = args.ollama_model.replace(":", "_") if args.backend == "ollama" else Path(args.model).stem
     output_dir = args.output_dir / model_stem
-    print(f"Model: {model_stem}")
+    print(f"Model: {model_stem}  backend: {args.backend}")
 
     if not args.accuracy and args.performance_benchmark:
         print("WARNING: --accuracy not set. Skipping accuracy evaluation.")
 
     if args.accuracy == "datasets":
         print(f"Running accuracy evaluation on datasets: {', '.join(DATASETS)}")
-        with LlamaServer(args.model) as server:
+        if args.backend == "ollama":
+            backend = OllamaBackend(args.ollama_model)
+        else:
+            backend = LlamaServer(args.model)
+        with backend as server:
             ttlm_s = server.ttlm_s
-            print(f"TTLM: {ttlm_s:.2f} s")
+            if ttlm_s is not None:
+                print(f"TTLM: {ttlm_s:.2f} s")
             for dataset in tqdm(DATASETS, desc="datasets"):
                 rows = [
                     json.loads(line)
