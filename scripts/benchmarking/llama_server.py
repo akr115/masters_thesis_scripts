@@ -40,8 +40,7 @@ class LlamaServer:
             "--no-webui",
             "--jinja",  # use full GGUF Jinja template (adds Cutting Knowledge Date system header)
         ]
-        if cfg.llama_n_gpu_layers >= 0:
-            cmd += ["-ngl", str(cfg.llama_n_gpu_layers)]
+        cmd += ["-ngl", str(cfg.llama_n_gpu_layers)]
         if cfg.llama_n_threads > 0:
             cmd += ["-t", str(cfg.llama_n_threads)]
         if cfg.llama_n_threads_batch > 0:

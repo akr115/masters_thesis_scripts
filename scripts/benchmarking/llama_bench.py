@@ -73,10 +73,7 @@ def run_llama_bench(
         "-r", str(repetitions),
         "-o", "json",
     ]
-    # llama-bench default is 99 (all layers); -1 is llama-server shorthand for
-    # "all" but is not valid for llama-bench's range parser — skip it.
-    if cfg.llama_n_gpu_layers >= 0:
-        cmd += ["-ngl", str(cfg.llama_n_gpu_layers)]
+    cmd += ["-ngl", str(cfg.llama_n_gpu_layers)]
     if cfg.llama_n_threads > 0:
         cmd += ["-t", str(cfg.llama_n_threads)]
 

@@ -11,7 +11,7 @@ Required variables (no defaults — must be set):
     DATASET_ROOT          Absolute path to neurips-edge-llm-challenge-sampled/.
 
 Optional hardware variables (defaults shown):
-    LLAMA_N_GPU_LAYERS   -1    GPU layers to offload (0=CPU only, -1=auto).
+    LLAMA_N_GPU_LAYERS   all   GPU layers to offload ("all"=all layers, 0=CPU only, N=exact count).
     LLAMA_N_THREADS       0    Generation threads  (0 = llama.cpp default).
     LLAMA_N_THREADS_BATCH 0    Batch-eval threads  (0 = llama.cpp default).
     LLAMA_BATCH_SIZE    512    Logical batch size.
@@ -51,7 +51,7 @@ class BenchConfig(BaseSettings):
     dataset_root: Path
 
     # ── Hardware ──────────────────────────────────────────────────────────────
-    llama_n_gpu_layers: int = -1     # -1 = auto-detect (omits -ngl flag)
+    llama_n_gpu_layers: int | str = "all"  # "all" = offload all layers; int = exact layer count
     llama_n_threads: int = 0        # 0 = llama.cpp chooses based on hardware
     llama_n_threads_batch: int = 0  # 0 = llama.cpp chooses based on hardware
     llama_batch_size: int = 512
