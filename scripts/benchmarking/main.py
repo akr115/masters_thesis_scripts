@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import requests
 from tqdm import tqdm
 
 from config import cfg
@@ -133,10 +134,15 @@ if __name__ == "__main__":
                     prompts, responses, timings = [], [], []
                     for row in tqdm(rows, desc="prompts", leave=False):
                         prompt = process_prompt(dataset, row)
-                        result = server.complete(prompt, max_tokens=max_tok)
-                        prompts.append(prompt)
-                        responses.append(result["content"])
-                        timings.append({k: result[k] for k in TIMING_KEYS})
+                        try:
+                            result = server.complete(prompt, max_tokens=max_tok)
+                            prompts.append(prompt)
+                            responses.append(result["content"])
+                            timings.append({k: result[k] for k in TIMING_KEYS})
+                        except (requests.exceptions.Timeout, requests.exceptions.HTTPError):
+                            prompts.append(prompt)
+                            responses.append("")
+                            timings.append({k: None for k in TIMING_KEYS})
 
                     df, stats = evaluate_responses(dataset, rows, responses, prompts=prompts)
                     timing_df = pd.DataFrame(timings)

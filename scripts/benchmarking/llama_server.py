@@ -54,6 +54,9 @@ class LlamaServer:
     def _wait_ready(self):
         deadline = time.monotonic() + SERVER_START_TIMEOUT
         while time.monotonic() < deadline:
+            if self._proc.poll() is not None:
+                out = self._proc.stdout.read().decode(errors="ignore")
+                raise RuntimeError(f"llama-server exited early (code {self._proc.returncode}):\n{out[-2000:]}")
             try:
                 r = requests.get(f"{self._base}/health", timeout=2)
                 if r.status_code == 200 and r.json().get("status") == "ok":
