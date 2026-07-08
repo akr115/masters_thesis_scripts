@@ -76,6 +76,12 @@ class LlamaServer:
                 self._proc.kill()
         self._proc = None
 
+    def ensure_alive(self):
+        """Restart the server if it has crashed (e.g. OOM during generation)."""
+        if self._proc is None or self._proc.poll() is not None:
+            self._stop()
+            self._start()
+
     def complete(self, prompt: str, max_tokens: int | None = None) -> dict:
         # Use /v1/chat/completions so llama-server applies the model's instruct chat
         # template automatically — matching the inference setup used by the paper

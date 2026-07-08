@@ -1,5 +1,6 @@
 import argparse
 import json
+import signal
 from pathlib import Path
 
 import pandas as pd
@@ -7,7 +8,15 @@ import requests
 from tqdm import tqdm
 
 from config import cfg
-from llama_server import LlamaServer
+from llama_server import LlamaServer, REQUEST_TIMEOUT
+
+
+class _TimeoutError(Exception):
+    pass
+
+
+def _alarm_handler(signum, frame):
+    raise _TimeoutError
 from llama_bench import run_llama_bench
 from metrics import (
     read_gguf_meta,
@@ -118,6 +127,7 @@ if __name__ == "__main__":
 
     if args.accuracy == "datasets":
         print(f"Running accuracy evaluation on datasets: {', '.join(DATASETS)}")
+        signal.signal(signal.SIGALRM, _alarm_handler)
         with LlamaServer(args.model) as server:
             ttlm_s = server.ttlm_s
             print(f"TTLM: {ttlm_s:.2f} s")
@@ -134,15 +144,21 @@ if __name__ == "__main__":
                     prompts, responses, timings = [], [], []
                     for row in tqdm(rows, desc="prompts", leave=False):
                         prompt = process_prompt(dataset, row)
+                        signal.alarm(REQUEST_TIMEOUT)
                         try:
                             result = server.complete(prompt, max_tokens=max_tok)
                             prompts.append(prompt)
                             responses.append(result["content"])
                             timings.append({k: result[k] for k in TIMING_KEYS})
-                        except (requests.exceptions.Timeout, requests.exceptions.HTTPError):
+                        except (_TimeoutError, requests.exceptions.Timeout,
+                                requests.exceptions.HTTPError,
+                                requests.exceptions.ConnectionError):
                             prompts.append(prompt)
                             responses.append("")
                             timings.append({k: None for k in TIMING_KEYS})
+                            server.ensure_alive()
+                        finally:
+                            signal.alarm(0)
 
                     df, stats = evaluate_responses(dataset, rows, responses, prompts=prompts)
                     timing_df = pd.DataFrame(timings)
