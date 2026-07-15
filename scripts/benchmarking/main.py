@@ -29,9 +29,11 @@ from prompts import DATASET_PATHS, process_prompt
 from evaluation import evaluate_responses, save_results
 from perplexity import run_perplexity
 
-DATASETS = ["bbh", "commonsenseqa", "gsm8k",  "truthfulqa", "humaneval"]
+# DATASETS = ["bbh", "commonsenseqa", "gsm8k",  "truthfulqa", "humaneval"]
+DATASETS = ["humaneval"]
 TIMING_KEYS = ["e2e_latency_s", "ttft_approx_ms", "throughput_tps",
                "prompt_tokens", "generated_tokens", "generation_ms"]
+SERVER_CHUNK_SIZE = 50
 
 
 def _timing_stats(df: pd.DataFrame) -> dict:
@@ -128,61 +130,69 @@ if __name__ == "__main__":
     if args.accuracy == "datasets":
         print(f"Running accuracy evaluation on datasets: {', '.join(DATASETS)}")
         signal.signal(signal.SIGALRM, _alarm_handler)
-        with LlamaServer(args.model) as server:
-            ttlm_s = server.ttlm_s
-            print(f"TTLM: {ttlm_s:.2f} s")
-            for dataset in tqdm(DATASETS, desc="datasets"):
-                rows = [
-                    json.loads(line)
-                    for line in Path(DATASET_PATHS[dataset]).read_text().splitlines()
-                    if line.strip()
-                ]
-                # HumanEval functions can require many tokens to implement fully;
-                # cap other datasets at llama_n_predict to keep runs bounded.
-                max_tok = -1 if dataset == "humaneval" else cfg.llama_n_predict
-                for run in tqdm(range(args.iterations), desc=dataset, leave=False):
-                    prompts, responses, timings = [], [], []
-                    for row in tqdm(rows, desc="prompts", leave=False):
-                        prompt = process_prompt(dataset, row)
-                        signal.alarm(REQUEST_TIMEOUT)
-                        try:
-                            result = server.complete(prompt, max_tokens=max_tok)
-                            prompts.append(prompt)
-                            responses.append(result["content"])
-                            timings.append({k: result[k] for k in TIMING_KEYS})
-                        except (_TimeoutError, requests.exceptions.Timeout,
-                                requests.exceptions.HTTPError,
-                                requests.exceptions.ConnectionError):
-                            prompts.append(prompt)
-                            responses.append("")
-                            timings.append({k: None for k in TIMING_KEYS})
-                            server.ensure_alive()
-                        finally:
-                            signal.alarm(0)
+        for dataset in tqdm(DATASETS, desc="datasets"):
+            rows = [
+                json.loads(line)
+                for line in Path(DATASET_PATHS[dataset]).read_text().splitlines()
+                if line.strip()
+            ]
+            # HumanEval functions can require many tokens to implement fully;
+            # cap other datasets at llama_n_predict to keep runs bounded.
+            # max_tok = 1024 if dataset == "humaneval" else cfg.llama_n_predict
+            max_tok = 1024 if dataset == "humaneval" else cfg.llama_n_predict
+            for run in tqdm(range(args.iterations), desc=dataset, leave=False):
+                prompts, responses, timings = [], [], []
+                ttlm_s = None
+                pbar = tqdm(total=len(rows), desc="prompts", leave=False)
+                for chunk_start in range(0, len(rows), SERVER_CHUNK_SIZE):
+                    chunk_rows = rows[chunk_start:chunk_start + SERVER_CHUNK_SIZE]
+                    with LlamaServer(args.model) as server:
+                        if ttlm_s is None:
+                            ttlm_s = server.ttlm_s
+                            print(f"TTLM: {ttlm_s:.2f} s")
+                        for row in chunk_rows:
+                            prompt = process_prompt(dataset, row)
+                            signal.alarm(REQUEST_TIMEOUT)
+                            try:
+                                result = server.complete(prompt, max_tokens=max_tok)
+                                prompts.append(prompt)
+                                responses.append(result["content"])
+                                timings.append({k: result[k] for k in TIMING_KEYS})
+                            except (_TimeoutError, requests.exceptions.Timeout,
+                                    requests.exceptions.HTTPError,
+                                    requests.exceptions.ConnectionError):
+                                prompts.append(prompt)
+                                responses.append("")
+                                timings.append({k: None for k in TIMING_KEYS})
+                                server.ensure_alive()
+                            finally:
+                                signal.alarm(0)
+                            pbar.update(1)
+                pbar.close()
 
-                    df, stats = evaluate_responses(dataset, rows, responses, prompts=prompts)
-                    timing_df = pd.DataFrame(timings)
-                    df = df.reset_index(drop=True)
-                    df["dataset"] = dataset
-                    df["run"]     = run
-                    df["prompt"]  = prompts
-                    df[TIMING_KEYS] = timing_df
+                df, stats = evaluate_responses(dataset, rows, responses, prompts=prompts)
+                timing_df = pd.DataFrame(timings)
+                df = df.reset_index(drop=True)
+                df["dataset"] = dataset
+                df["run"]     = run
+                df["prompt"]  = prompts
+                df[TIMING_KEYS] = timing_df
 
-                    save_results(df, output_dir)
+                save_results(df, output_dir)
 
-                    summary_record = {
-                        "dataset": dataset,
-                        "run":     run,
-                        "ttlm_s":  ttlm_s,
-                        **stats,
-                        **_timing_stats(df),
-                    }
-                    with (output_dir / "summary.jsonl").open("a") as f:
-                        f.write(json.dumps(summary_record) + "\n")
+                summary_record = {
+                    "dataset": dataset,
+                    "run":     run,
+                    "ttlm_s":  ttlm_s,
+                    **stats,
+                    **_timing_stats(df),
+                }
+                with (output_dir / "summary.jsonl").open("a") as f:
+                    f.write(json.dumps(summary_record) + "\n")
 
-                    tps = summary_record["throughput_tps_mean"]
-                    print(f"Run {run} | {dataset}: {stats['accuracy']:.1%} ({stats['correct']}/{stats['total']})  "
-                          f"tps={tps:.1f}  ttft≈{summary_record['ttft_approx_ms_mean']:.0f}ms")
+                tps = summary_record["throughput_tps_mean"]
+                print(f"Run {run} | {dataset}: {stats['accuracy']:.1%} ({stats['correct']}/{stats['total']})  "
+                      f"tps={tps:.1f}  ttft≈{summary_record['ttft_approx_ms_mean']:.0f}ms")
 
     elif args.accuracy == "perplexity":
         stats = run_perplexity(args.model, output_dir)
