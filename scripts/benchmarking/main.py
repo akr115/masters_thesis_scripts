@@ -69,7 +69,7 @@ def run_performance_benchmark(model_path: str | Path, output_dir: Path) -> dict:
     with LlamaServer(model_path) as server:
         ttlm_s = server.ttlm_s
         print(f"[perf] TTLM: {ttlm_s:.2f} s")
-        ttft_rows = [server.complete_stream("What is the capital of France?") for _ in range(3)]
+        ttft_rows = [server.complete_stream("What is the capital of France?") for _ in range(args.iterations)]
 
     ttft_df = pd.DataFrame(ttft_rows)[["ttft_s", "e2e_latency_s", "throughput_tps", "generated_tokens"]]
     print(ttft_df.to_string(index=False))
