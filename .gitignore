@@ -1,6 +1,19 @@
-*.out
-venv/
-config.env
-.DS_Store
+# Python
 __pycache__/
+*.py[cod]
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Machine-local config (see config.env.example)
+config.env
+
+# Slurm job output
+*.out
+
+# Benchmark results
 outputs/
+outputs_*/
+
+# macOS
+.DS_Store

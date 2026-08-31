@@ -1,3 +1,18 @@
+"""
+Benchmark one GGUF model: task accuracy, perplexity, and/or runtime performance.
+
+Source your machine-local config.env first (see config.py for the variables):
+
+    source config.env
+    python main.py --model model.gguf --accuracy datasets --performance_benchmark
+
+Outputs are appended under <output_dir>/<model_stem>/:
+    rows.jsonl        one line per prompt, with per-row scoring and timings
+    summary.jsonl     one line per (dataset, run) with accuracy and timing stats
+    perplexity.jsonl  one line per perplexity run
+    performance.jsonl one line per performance run
+"""
+
 import argparse
 import json
 import signal
@@ -8,16 +23,9 @@ import requests
 from tqdm import tqdm
 
 from config import cfg
-from llama_server import LlamaServer, REQUEST_TIMEOUT
-
-
-class _TimeoutError(Exception):
-    pass
-
-
-def _alarm_handler(signum, frame):
-    raise _TimeoutError
+from evaluation import evaluate_responses, save_results
 from llama_bench import run_llama_bench
+from llama_server import LlamaServer, REQUEST_TIMEOUT
 from metrics import (
     read_gguf_meta,
     compute_kv_cache_bytes,
@@ -25,13 +33,32 @@ from metrics import (
     compute_flops_prefill,
     compute_mbu,
 )
-from prompts import DATASET_PATHS, process_prompt
-from evaluation import evaluate_responses, save_results
 from perplexity import run_perplexity
+from prompts import DATASET_PATHS, process_prompt
 
-DATASETS = ["bbh", "commonsenseqa", "gsm8k",  "truthfulqa", "humaneval"]
+DATASETS = ["bbh", "commonsenseqa", "gsm8k", "truthfulqa", "humaneval"]
 TIMING_KEYS = ["e2e_latency_s", "ttft_approx_ms", "throughput_tps",
                "prompt_tokens", "generated_tokens", "generation_ms"]
+
+TTFT_PROMPT = "What is the capital of France?"
+
+
+class RequestTimeout(Exception):
+    """Raised by the SIGALRM handler when a request outlives REQUEST_TIMEOUT."""
+
+
+def _alarm_handler(signum, frame):
+    raise RequestTimeout
+
+
+# A dead or wedged server surfaces as any of these; each is recoverable by
+# recording an empty response and restarting the server before the next prompt.
+RECOVERABLE_ERRORS = (
+    RequestTimeout,
+    requests.exceptions.Timeout,
+    requests.exceptions.HTTPError,
+    requests.exceptions.ConnectionError,
+)
 
 
 def _timing_stats(df: pd.DataFrame) -> dict:
@@ -41,7 +68,85 @@ def _timing_stats(df: pd.DataFrame) -> dict:
             for col in TIMING_KEYS for stat in ("mean", "std")}
 
 
-def run_performance_benchmark(model_path: str | Path, output_dir: Path) -> dict:
+def _load_rows(dataset: str) -> list[dict]:
+    """Read one dataset's jsonl into a list of row dicts."""
+    text = Path(DATASET_PATHS[dataset]).read_text()
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+def _collect_responses(server: LlamaServer, dataset: str, rows: list[dict],
+                       max_tokens: int) -> tuple[list[str], list[str], list[dict]]:
+    """Prompt the server once per row, returning (prompts, responses, timings).
+
+    A prompt that times out or kills the server yields an empty response and
+    null timings, and the server is restarted before the next prompt.
+    """
+    prompts, responses, timings = [], [], []
+    for row in tqdm(rows, desc="prompts", leave=False):
+        prompt = process_prompt(dataset, row)
+        prompts.append(prompt)
+        signal.alarm(REQUEST_TIMEOUT)
+        try:
+            result = server.complete(prompt, max_tokens=max_tokens)
+            responses.append(result["content"])
+            timings.append({k: result[k] for k in TIMING_KEYS})
+        except RECOVERABLE_ERRORS:
+            responses.append("")
+            timings.append({k: None for k in TIMING_KEYS})
+            server.ensure_alive()
+        finally:
+            signal.alarm(0)
+    return prompts, responses, timings
+
+
+def run_accuracy_benchmark(model_path: str | Path, output_dir: Path,
+                           iterations: int) -> None:
+    """Evaluate the model on every dataset in DATASETS, `iterations` times each."""
+    print(f"Running accuracy evaluation on datasets: {', '.join(DATASETS)}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    signal.signal(signal.SIGALRM, _alarm_handler)
+
+    with LlamaServer(model_path) as server:
+        ttlm_s = server.ttlm_s
+        print(f"TTLM: {ttlm_s:.2f} s")
+
+        for dataset in tqdm(DATASETS, desc="datasets"):
+            rows = _load_rows(dataset)
+            # HumanEval functions can require many tokens to implement fully;
+            # cap other datasets at llama_n_predict to keep runs bounded.
+            max_tokens = -1 if dataset == "humaneval" else cfg.llama_n_predict
+
+            for run in tqdm(range(iterations), desc=dataset, leave=False):
+                prompts, responses, timings = _collect_responses(
+                    server, dataset, rows, max_tokens)
+
+                df, stats = evaluate_responses(dataset, rows, responses, prompts=prompts)
+                df = df.reset_index(drop=True)
+                df["dataset"] = dataset
+                df["run"] = run
+                df["prompt"] = prompts
+                df[TIMING_KEYS] = pd.DataFrame(timings)
+                save_results(df, output_dir)
+
+                summary = {
+                    "dataset": dataset,
+                    "run": run,
+                    "ttlm_s": ttlm_s,
+                    **stats,
+                    **_timing_stats(df),
+                }
+                with (output_dir / "summary.jsonl").open("a") as f:
+                    f.write(json.dumps(summary) + "\n")
+
+                print(f"Run {run} | {dataset}: {stats['accuracy']:.1%} "
+                      f"({stats['correct']}/{stats['total']})  "
+                      f"tps={summary['throughput_tps_mean']:.1f}  "
+                      f"ttft≈{summary['ttft_approx_ms_mean']:.0f}ms")
+
+
+def run_performance_benchmark(model_path: str | Path, output_dir: Path,
+                              iterations: int) -> dict:
+    """Measure model-size, FLOPs, throughput, TTFT and MBU; append one jsonl record."""
     model_path = Path(model_path)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -69,13 +174,14 @@ def run_performance_benchmark(model_path: str | Path, output_dir: Path) -> dict:
     with LlamaServer(model_path) as server:
         ttlm_s = server.ttlm_s
         print(f"[perf] TTLM: {ttlm_s:.2f} s")
-        ttft_rows = [server.complete_stream("What is the capital of France?") for _ in range(args.iterations)]
+        ttft_rows = [server.complete_stream(TTFT_PROMPT) for _ in range(iterations)]
 
     ttft_df = pd.DataFrame(ttft_rows)[["ttft_s", "e2e_latency_s", "throughput_tps", "generated_tokens"]]
     print(ttft_df.to_string(index=False))
     avg_ttft_s   = ttft_df["ttft_s"].mean()
     avg_live_tps = ttft_df["throughput_tps"].mean()
 
+    # Prefer llama-bench's tg throughput; fall back to the live server average.
     mbu_tps = tg_ts or avg_live_tps
     mbu = compute_mbu(meta=meta, kv_cache_bytes=kv_bytes,
                       throughput_tps=mbu_tps, peak_bw_gbps=cfg.peak_memory_bw_gbps) if mbu_tps else None
@@ -106,87 +212,42 @@ def run_performance_benchmark(model_path: str | Path, output_dir: Path) -> dict:
     return record
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Benchmark one GGUF model: accuracy, perplexity and/or performance.")
     parser.add_argument("--model", required=True, help="Path to .gguf model file")
-    parser.add_argument("--accuracy", choices=["datasets", "perplexity"])
-    parser.add_argument("--performance_benchmark", action="store_true")
-    parser.add_argument("--iterations", type=int, default=5)
+    parser.add_argument("--accuracy", choices=["datasets", "perplexity"],
+                        help="Accuracy method: task datasets, or WikiText perplexity")
+    parser.add_argument("--performance_benchmark", action="store_true",
+                        help="Measure throughput, TTFT, FLOPs, KV cache size and MBU")
+    parser.add_argument("--iterations", type=int, default=5,
+                        help="Repeats per dataset, and TTFT samples (default: 5)")
     parser.add_argument("--output_dir", type=Path, default=Path("outputs"))
     args = parser.parse_args()
 
     if not args.accuracy and not args.performance_benchmark:
         parser.error("No benchmark selected. Provide --accuracy and/or --performance_benchmark.")
+    return args
+
+
+def main() -> None:
+    args = parse_args()
 
     model_stem = Path(args.model).stem
     output_dir = args.output_dir / model_stem
     print(f"Model: {model_stem}")
 
-    if not args.accuracy and args.performance_benchmark:
-        print("WARNING: --accuracy not set. Skipping accuracy evaluation.")
-
     if args.accuracy == "datasets":
-        print(f"Running accuracy evaluation on datasets: {', '.join(DATASETS)}")
-        signal.signal(signal.SIGALRM, _alarm_handler)
-        with LlamaServer(args.model) as server:
-            ttlm_s = server.ttlm_s
-            print(f"TTLM: {ttlm_s:.2f} s")
-            for dataset in tqdm(DATASETS, desc="datasets"):
-                rows = [
-                    json.loads(line)
-                    for line in Path(DATASET_PATHS[dataset]).read_text().splitlines()
-                    if line.strip()
-                ]
-                # HumanEval functions can require many tokens to implement fully;
-                # cap other datasets at llama_n_predict to keep runs bounded.
-                max_tok = -1 if dataset == "humaneval" else cfg.llama_n_predict
-                for run in tqdm(range(args.iterations), desc=dataset, leave=False):
-                    prompts, responses, timings = [], [], []
-                    for row in tqdm(rows, desc="prompts", leave=False):
-                        prompt = process_prompt(dataset, row)
-                        signal.alarm(REQUEST_TIMEOUT)
-                        try:
-                            result = server.complete(prompt, max_tokens=max_tok)
-                            prompts.append(prompt)
-                            responses.append(result["content"])
-                            timings.append({k: result[k] for k in TIMING_KEYS})
-                        except (_TimeoutError, requests.exceptions.Timeout,
-                                requests.exceptions.HTTPError,
-                                requests.exceptions.ConnectionError):
-                            prompts.append(prompt)
-                            responses.append("")
-                            timings.append({k: None for k in TIMING_KEYS})
-                            server.ensure_alive()
-                        finally:
-                            signal.alarm(0)
-
-                    df, stats = evaluate_responses(dataset, rows, responses, prompts=prompts)
-                    timing_df = pd.DataFrame(timings)
-                    df = df.reset_index(drop=True)
-                    df["dataset"] = dataset
-                    df["run"]     = run
-                    df["prompt"]  = prompts
-                    df[TIMING_KEYS] = timing_df
-
-                    save_results(df, output_dir)
-
-                    summary_record = {
-                        "dataset": dataset,
-                        "run":     run,
-                        "ttlm_s":  ttlm_s,
-                        **stats,
-                        **_timing_stats(df),
-                    }
-                    with (output_dir / "summary.jsonl").open("a") as f:
-                        f.write(json.dumps(summary_record) + "\n")
-
-                    tps = summary_record["throughput_tps_mean"]
-                    print(f"Run {run} | {dataset}: {stats['accuracy']:.1%} ({stats['correct']}/{stats['total']})  "
-                          f"tps={tps:.1f}  ttft≈{summary_record['ttft_approx_ms_mean']:.0f}ms")
-
+        run_accuracy_benchmark(args.model, output_dir, args.iterations)
     elif args.accuracy == "perplexity":
         stats = run_perplexity(args.model, output_dir)
         print(f"Perplexity: {stats['ppl']:.4f} ± {stats['ppl_std']:.4f}")
+    else:
+        print("WARNING: --accuracy not set. Skipping accuracy evaluation.")
 
     if args.performance_benchmark:
-        run_performance_benchmark(args.model, output_dir)
+        run_performance_benchmark(args.model, output_dir, args.iterations)
+
+
+if __name__ == "__main__":
+    main()

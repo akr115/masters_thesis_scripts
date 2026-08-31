@@ -7,13 +7,13 @@ tqdm
 # DataFrame-based evaluation (evaluation.py, evaluations/)
 pandas
 
-# HTTP client for llama-server /completion calls (generate.py)
+# HTTP client for llama-server calls (llama_server.py)
 requests
 
 # Configuration (config.py)
 pydantic-settings
 
-# GGUF metadata reader (bench/gguf_meta.py)
+# GGUF metadata reader (metrics.py)
 gguf
 
 # TruthfulQA scoring: ROUGE-L + TF-IDF cosine similarity
