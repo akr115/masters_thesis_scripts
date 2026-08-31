@@ -26,8 +26,12 @@ pruning uses [WANDA](https://github.com/locuslab/wanda).
 WANDA parameters (see `jobscripts/wanda_prune.sh`):
 
 - `--prune_method wanda`
-- `--sparsity_ratio 0.66` — fraction of weights zeroed.
+- `--sparsity_ratio` — fraction of weights zeroed; passed as the first script
+  argument (default 0.20).
 - `--sparsity_type unstructured` — applied to individual weights, not blocks.
+
+The output directory is tagged with the ratio, so `0.20` and `0.66` produce
+`<model>-wanda-sp20` and `<model>-wanda-sp66`.
 
 Unstructured pruning zeroes weights rather than removing them, so pruned GGUFs
 are the same size as the dense model and llama.cpp gains no speedup from the
@@ -66,9 +70,38 @@ Run the prompt-formatting tests with `pytest` from `scripts/benchmarking/`.
 
 ## Typical cluster usage
 
-- Download a model: `jobscripts/download.sh`
-- Prune with WANDA: `jobscripts/wanda_prune.sh`
-- Convert + quantize to Q5_0: `jobscripts/quantize_q5_0.sh`
+Slurm resolves `#SBATCH --output=` before the job script runs, so the log
+directories must exist or the job fails to launch. They are gitignored, so
+create them once after cloning:
+
+```bash
+mkdir -p results_download results_prune results_quantize results_upload \
+         results_1b_conversion results_3b_conversion results_prune_conversion
+```
+
+Then, in pipeline order:
+
+| Step | Script |
+|---|---|
+| Download a model | `jobscripts/download_scripts/download_{1b,3b_base,3b_instruct}.sh` |
+| Convert to GGUF f16 | `jobscripts/convert_scripts/*_convert_to_gguf.sh` |
+| Prune with WANDA | `jobscripts/wanda_prune.sh [SPARSITY] [MODEL_NAME]` |
+| Convert a pruned model | `jobscripts/wanda_pruned_convert_to_gguf.sh` |
+| Quantize to Q5_0 | `jobscripts/quantize_q5_0.sh`, `jobscripts/quantize_instruct_q5_0.sh` |
+| Upload to the Hub | `jobscripts/upload_scripts/upload_gguf_to_hf.sh [LOCAL_DIR] [REPO_ID]` |
+
+`wanda_prune.sh` takes the sparsity ratio and model directory as arguments, so
+one script covers both ratios:
+
+```bash
+sbatch jobscripts/wanda_prune.sh 0.20 llama3.2-3b-instruct
+sbatch jobscripts/wanda_prune.sh 0.66 llama3.2-3b
+```
+
+The upload script authenticates with the token stored by `hf auth login` and
+creates repos private by default (`PRIVATE=0` to create them public).
+`hf upload-large-folder` is resumable, so a re-submitted job continues where it
+stopped.
 
 ## Published models
 

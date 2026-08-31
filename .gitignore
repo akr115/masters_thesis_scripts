@@ -5,11 +5,16 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
-# Machine-local config (see config.env.example)
+# Stray venv artifacts (see jobscripts/ incident: `python -m venv jobscripts`)
+pyvenv.cfg
+
+# Machine-local config (see scripts/benchmarking/config.env.example)
 config.env
 
-# Slurm job output
+# SLURM job output
 *.out
+*.err
+results_*/
 
 # Benchmark results
 outputs/
