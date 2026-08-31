@@ -1,1 +1,11 @@
+# SLURM job output
 *.out
+*.err
+results_*/
+
+# Python
+__pycache__/
+*.pyc
+
+# Stray venv artifacts (see jobscripts/ incident: `python -m venv jobscripts`)
+pyvenv.cfg

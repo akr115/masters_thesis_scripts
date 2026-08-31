@@ -8,11 +8,14 @@ from pathlib import Path
 USER           = os.environ["USER"]
 BASE           = Path(f"/home2/{USER}/masters_thesis")
 
-HF_MODEL_DIR = BASE / "models" / "llama3.2-3b"
-OUTPUT_DIR   = BASE / "llama3.2-3b-gguf"
-GGUF_F16     = OUTPUT_DIR / "llama3.2-3b-f16.gguf"
+# Which pruned model to convert; override with e.g. MODEL_NAME=llama3.2-3b-instruct-wanda-sp66
+MODEL_NAME     = os.environ.get("MODEL_NAME", "llama3.2-3b-instruct-wanda-sp20")
 
-LLAMA_CPP_DIR  = BASE / "llama.cpp"
+HF_MODEL_DIR = BASE / "models" / MODEL_NAME
+OUTPUT_DIR   = BASE / f"{MODEL_NAME}-gguf"
+GGUF_F16     = OUTPUT_DIR / f"{MODEL_NAME}-f16.gguf"
+
+LLAMA_CPP_DIR  = Path(os.environ.get("LLAMA_CPP_DIR", BASE / "llama-cpp-thesis"))
 CONVERT_SCRIPT = LLAMA_CPP_DIR / "convert_hf_to_gguf.py"
 
 # ──────────────────────────────────────────────
